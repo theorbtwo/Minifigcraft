@@ -183,20 +183,24 @@ while (@stack) {
 #print "<finished>\n";
 #Dump \@model_data;
 
-print "solid name\n";
+my %vertex_knowns;
+my $next_vertex_n = 1;
 
 for my $facet (@model_data) {
-  my @points = @{$facet->{points}};
-  my @normal = triangle_normal(map{@$_} @points);
-  print <<"END";
-facet normal $normal[0] $normal[1] $normal[2]
-  outer loop
-    vertex $points[0][0] $points[0][1] $points[0][2]
-    vertex $points[1][0] $points[1][1] $points[1][2]
-    vertex $points[2][0] $points[2][1] $points[2][2]
-  endloop
-endfacet
-END
+  my @vertex_nums;
+  for my $vertex (@{$facet->{points}}) {
+    my $n;
+    my $short = join ' ', @$vertex;
+    if ($vertex_knowns{$short}) {
+      $n = $vertex_knowns{$short};
+    } else {
+      $n = $next_vertex_n++;
+      $vertex_knowns{$short} = $n;
+      print "v $short\n";
+    }
+    push @vertex_nums, $n;
+  }
+  print "f ", join(" ", @vertex_nums), "\n";
 }
 
 sub apply_xform {
