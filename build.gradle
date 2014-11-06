@@ -1,352 +1,63 @@
 buildscript {
-	repositories {
-		mavenCentral()
-		maven {
-			name = "forge"
-			url = "http://files.minecraftforge.net/maven"
-		}
-		maven {
-			name = "sonatype"
-			url = "https://oss.sonatype.org/content/repositories/snapshots/"
-		}
-	}
-	dependencies {
-		classpath 'net.minecraftforge.gradle:ForgeGradle:1.2-SNAPSHOT'
-		// https://github.com/ajoberstar/gradle-git
-		classpath 'org.ajoberstar:gradle-git:0.8.0'
-	}
+    repositories {
+        mavenCentral()
+        maven {
+            name = "forge"
+            url = "http://files.minecraftforge.net/maven"
+        }
+        maven {
+            name = "sonatype"
+            url = "https://oss.sonatype.org/content/repositories/snapshots/"
+        }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:1.2-SNAPSHOT'
+    }
 }
 
 apply plugin: 'forge'
-apply plugin: 'maven'
 
-loadProperties()
-
-version = version_major + '.' + version_minor + '.' + version_patch + '.' + getBuildNumber()
-if (project.hasProperty('buildQualifier')) {
-	version = project.version + '-' + project.buildQualifier
-}
-group= "uk.me.jandj" // http://maven.apache.org/guides/mini/guide-naming-conventions.html
-archivesBaseName = "minifigcraft_" + mcversion
-
-ext.dirDest = './build/dist'
-ext.dirLang = "./lang"
-ext.dirApi = "./api"
-
-//ext.CraftGuideRepo = "https://github.com/Uristqwerty/CraftGuide.git"
-//ext.CraftGuideTmp = "build/tmp/CraftGuide"
+version = "1.0"
+group= "com.yourname.modid" // http://maven.apache.org/guides/mini/guide-naming-conventions.html
+archivesBaseName = "modid"
 
 minecraft {
-	version = mcversion + "-" + forgeversion
-	runDir = "run"
-
-	replace '@VERSION@', project.version
-	replace '@BUILD_NUMBER@', getBuildNumber()
-}
-
-sourceSets {
-	api {
-		java {
-//			srcDir CraftGuideTmp + "/src"
-//			include '**/CraftGuide/api/**'
-		}
-	}
-	
-	main {
-		java {
-			srcDir project.dirApi
-		}
-		resources {
-			srcDir project.dirLang
-		}
-	}
-}
-
-repositories {
-	maven {
-		name = "ic2"
-		url = "http://maven.ic2.player.to/"
-	}
-}
-
-configurations {
-	apis
-	compile.extendsFrom apis
+    version = "1.7.10-10.13.2.1235"
+    runDir = "eclipse"
 }
 
 dependencies {
-//	compile 'net.industrial-craft:industrialcraft-2:2.2.575-experimental:api'
-//	apis 'com.mod-buildcraft:buildcraft:6.1.5:dev'
+    // you may put jars on which you depend on in ./libs
+    // or you may define them like so..
+    //compile "some.group:artifact:version:classifier"
+    //compile "some.group:artifact:version"
+      
+    // real examples
+    //compile 'com.mod-buildcraft:buildcraft:6.0.8:dev'  // adds buildcraft to the dev env
+    //compile 'com.googlecode.efficient-java-matrix-library:ejml:0.24' // adds ejml to the dev env
+
+    // for more info...
+    // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
+    // http://www.gradle.org/docs/current/userguide/dependency_management.html
+
 }
 
-processResources {
+processResources
+{
+    // this will ensure that this task is redone when the versions change.
+    inputs.property "version", project.version
+    inputs.property "mcversion", project.minecraft.version
 
-	// this will ensure that this task is redone when the versions change.
-	inputs.property "version", project.version
-	inputs.property "mcversion", project.minecraft.version
-
-	// replace stuff in mcmod.info, nothing else
-	from(sourceSets.main.resources.srcDirs) {
-		include 'mcmod.info'
-
-		// replace version and mcversion
-		expand 'version':project.version, 'mcversion':project.minecraft.version
-	}
-
-	// copy everything else, thats not the mcmod.info
-	from(sourceSets.main.resources.srcDirs) {
-		exclude 'mcmod.info'
-		exclude '**/*.md'
-	}
+    // replace stuff in mcmod.info, nothing else
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+                
+        // replace version and mcversion
+        expand 'version':project.version, 'mcversion':project.minecraft.version
+    }
+        
+    // copy everything else, thats not the mcmod.info
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info'
+    }
 }
-
-runClient {
-	if (project.hasProperty('mcUsername')) {
-		args "--username=" + project.mcUsername
-	}
-	if (project.hasProperty('mcPassword')) {
-		args "--password=" + project.mcPassword
-	}
-}
-
-debugClient {
-	if (project.hasProperty('mcUsername')) {
-		args "--username=" + project.mcUsername
-	}
-	if (project.hasProperty('mcPassword')) {
-		args "--password=" + project.mcPassword
-	}
-}
-
-task echoVersion << {
-	printNextVersion()
-}
-
-def saveVersion() {
-	ant.propertyfile(
-		file: "application.properties") {
-		entry( key:"version_major", type:"int", value: version_major)
-		entry( key:"version_minor", type:"int", value: version_minor)
-		entry( key:"version_patch", type:"int", value: version_patch)
-	}
-	project.version = version_major + '.' + version_minor + '.' + version_patch + '.' + getBuildNumber()
-	printNextVersion()
-}
-
-def printNextVersion() {
-	println '*************************************************************'
-	println 'The next build will be version: ' +  project.version
-	println '*************************************************************'
-}
-
-task bumpMajor << {
-	project.version_major = Integer.parseInt(project.version_major) + 1
-	project.version_minor = "0"
-	project.version_patch = "0"
-	saveVersion()
-}
-
-task bumpMinor << {
-	project.version_minor = Integer.parseInt(project.version_minor) + 1
-	project.version_patch = "0"
-	saveVersion()
-}
-
-task bumpPatch << {
-	project.version_patch = Integer.parseInt(project.version_patch) + 1
-	saveVersion()
-}
-
-import org.ajoberstar.grgit.Grgit
-
-/*
-task initCraftGuide << {
-	def localRepo = file(CraftGuideTmp)
-
-	if (localRepo.exists()) {
-		println 'Updating CraftGuide repo'
-		def grgit = Grgit.open(localRepo)
-		grgit.pull()
-		grgit.close()
-	} else {
-		println 'Cloning CraftGuide repo'
-		def grgit = Grgit.clone(dir: localRepo, uri: CraftGuideRepo)
-		grgit.close()
-	}
-}
-*/
-
-jar {
-	destinationDir = file("build/tmp")
-	archiveName = "main.jar"
-
-	from {
-		configurations.apis.collect {
-			it.isDirectory() ? it : zipTree(it).matching {
-				include '**/api/**'
-			}
-		}
-	}
-}
-
-task mainJarSigned ( type: Jar, dependsOn: 'reobf' ) {
-	from (zipTree(jar.getArchivePath())) {
-		exclude '**/api/**'
-		exclude '**/codechicken/**'
-		exclude '**/old/lang/**'
-	}
-
-	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-	destinationDir = file("build/tmp")
-	archiveName = "signed.jar"
-
-	doLast {
-		if (project.hasProperty('signingKeystore')) {
-			ant.signjar(jar: getArchivePath(),
-				alias: signingAlias,
-				keystore: signingKeystore,
-				storepass: signingStorepass)
-		} else {
-			println 'Signing disabled, gradle.properties is missing.'
-		}
-	}
-}
-
-task mainJar ( type: Zip, dependsOn: mainJarSigned ) {
-	from (zipTree(mainJarSigned.getArchivePath())) {
-		include '**'
-	}
-
-	from (zipTree(jar.getArchivePath())) {
-		include '**'
-		exclude '**/codechicken/**'
-		exclude '**/old/lang/**'
-	}
-
-	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-	destinationDir = file(dirDest)
-	includeEmptyDirs = false
-	extension = 'jar'
-}
-
-task devJarSigned ( type: Jar, dependsOn: 'classes' ) {
-	from(sourceSets.main.output) {
-		exclude '**/api/**'
-		exclude '**/codechicken/**'
-		exclude '**/old/lang/**'
-	}
-
-	destinationDir = file("build/tmp")
-	archiveName = "signed-dev.jar"
-
-	doLast {
-		if (project.hasProperty('signingKeystore')) {
-			ant.signjar(jar: getArchivePath(),
-				alias: signingAlias,
-				keystore: signingKeystore,
-				storepass: signingStorepass)
-		} else {
-			println 'Signing disabled, gradle.properties is missing.'
-		}
-	}
-}
-
-task devJar ( type: Zip, dependsOn: devJarSigned ) {
-	from (zipTree(devJarSigned.getArchivePath())) {
-		include '**'
-	}
-
-	from(sourceSets.main.allSource) {
-		include '**'
-		exclude '**/codechicken/**'
-		exclude '**/old/lang/**'
-	}
-
-	from(sourceSets.main.output) {
-		include '**'
-		exclude '**/codechicken/**'
-		exclude '**/old/lang/**'
-	}
-
-	from {
-		configurations.apis.collect {
-			it.isDirectory() ? it : zipTree(it).matching {
-				include '**/api/**'
-			}
-		}
-	}
-
-	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-	destinationDir = file(dirDest)
-	extension = 'jar'
-
-	classifier = 'dev'
-}
-
-task apiJar(type: Jar, dependsOn: 'classes') {
-	from (dirApi) {
-		include '**'
-	}
-	
-	from (sourceSets.main.output) {
-		include 'forestry/api/**'
-	}
-	
-	destinationDir = file(dirDest)
-	extension = 'jar'
-	classifier = 'api'
-}
-
-task release(dependsOn: [apiJar, devJar, mainJar]) {
-	doLast {
-		println '*************************************************************'
-		println 'This build will be version: ' +  project.version
-		println '*************************************************************'
-	}
-}
-
-afterEvaluate {
-	compileApiJava.dependsOn initCraftGuide
-}
-
-artifacts {
-	archives apiJar
-	archives devJar
-}
-
-uploadArchives {
-	repositories {
-		if (project.hasProperty('mavenDir')) {
-			mavenDeployer {
-				repository(url: "file://"+mavenDir)
-				
-				addFilter('api') { artifact, file ->
-					file == apiJar.archivePath
-				}
-				addFilter('dev') { artifact, file ->
-					file == devJar.archivePath
-				}
-			}
-		} else {
-			println 'Archives upload disabled, gradle.properties is missing.'
-		}
-	}
-}
-
-def loadProperties() {
-	println('loading application.properties')
-
-	file("application.properties").withReader { reader ->
-		def userProps = new Properties()
-		userProps.load(reader)
-
-		for (Map.Entry property in userProps) {
-			project.ext[property.getKey()] = property.getValue()
-		}
-	}
-}
-
-def getBuildNumber() {
-	return "$System.env.BUILD_NUMBER" != "null" ? "$System.env.BUILD_NUMBER" : "0"
-}
-
