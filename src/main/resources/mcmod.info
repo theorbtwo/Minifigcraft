@@ -1,14 +1,14 @@
 [
 {
-  "modid": "examplemod",
-  "name": "Example Mod",
-  "description": "Example placeholder mod.",
+  "modid": "minifigcraft",
+  "name": "Minifigcraft",
+  "description": "Fancy-looking models for players who want to look like lego minifigs.",
   "version": "${version}",
   "mcversion": "${mcversion}",
   "url": "",
   "updateUrl": "",
-  "authorList": ["ExampleDude"],
-  "credits": "The Forge and FML guys, for making this example",
+  "authorList": ["theorbtwo"],
+  "credits": "The ldraw contributors, for making these wonderful models, and the lego corporation (with whom this project is in no way affilliated) letting their IP be used so widely",
   "logoFile": "",
   "screenshots": [],
   "dependencies": []

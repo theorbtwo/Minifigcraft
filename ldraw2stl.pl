@@ -40,7 +40,12 @@ $bos->{color} = 0;
 # http://www.ldraw.org/Article218.html#coords
 # 1: Scale from LDU to mm.  1 ldu = 0.4 mm
 # 2: Rotate 90 degrees about x.  Ldraw's coord sys has -y as up, reprap's uses +z is up.
-$bos->{effective_matrix} = Math::MatrixReal->new(4,4)->exponent(0) * 0.4;
+my $s = 0.4;
+$bos->{effective_matrix} = Math::MatrixReal->new_from_rows([[$s,   0,   0,  0],
+                                                            [ 0,   0,  $s,  0],
+                                                            [ 0, -$s,   0,  0],
+                                                            [ 0,   0,   0,  1]]
+                                                           );
 
 $stack[0] = $bos;
 
@@ -205,7 +210,7 @@ for my $facet (@model_data) {
 
 sub apply_xform {
   my ($xform, $point) = @_;
-  # The $_+0 bit is to convert things of the form .333, which Math::MatrixReal chokes on.
+  # The $_+0 bit is to convert things of the form .333 (no leading zero), which Math::MatrixReal chokes on.
   my $xformed = $xform * Math::MatrixReal->new_from_cols([[map {$_+0} @$point, 1]]);
   
   return [$xformed->element(1,1),
