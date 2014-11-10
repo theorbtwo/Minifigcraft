@@ -6,3 +6,4 @@ start a creative mode game
 test 4: Does the helmet item show up on the Misc. creative tab?
 test 5: Does it have a name?
 test 6: Can you put it on your head?
+test 7: Can't you put it on your not-head?  (IE, it should only fit on your head, not on your feet.)
