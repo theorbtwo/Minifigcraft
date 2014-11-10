@@ -100,7 +100,7 @@ while (@stack) {
       }
     } else {
       # Not a BFC line.
-      #print "$line\n";
+      print "$line\n";
     }
 
     # At some point, will have to seperate out the important ones from the unimportant ones -- BFC probably the most important.
@@ -195,7 +195,13 @@ for my $facet (@model_data) {
   my @vertex_nums;
   for my $vertex (@{$facet->{points}}) {
     my $n;
-    my $short = join ' ', @$vertex;
+    # Forge's WavefrontObject seems a bit over-specific about the format of "v" lines:
+    # private static Pattern vertexPattern = Pattern.compile("(v( (\\-){0,1}\\d+\\.\\d+){3,4} *\\n)|(v( (\\-){0,1}\\d+\\.\\d+){3,4} *$)");
+    # (v( (\\-){0,1}\\d+\\.\\d+){3,4} *\\n)|(v( (\\-){0,1}\\d+\\.\\d+){3,4} *$)
+    # (v( (\-){0,1}\d+\.\d+){3,4} *\n)|(v( (\-){0,1}\d+\.\d+){3,4} *$)
+    # (v( (-){0,1}\d+\.\d+){3,4} *\n)|(v( (\-)?\d+\.\d+){3,4} *$)
+    # There must be a dot in every number, and at least one digit both before and after it.  (Even if the coord happens to be an integer.)
+    my $short = join ' ', map {sprintf "%.4f", $_} @$vertex;
     if ($vertex_knowns{$short}) {
       $n = $vertex_knowns{$short};
     } else {
