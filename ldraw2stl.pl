@@ -40,11 +40,18 @@ $bos->{color} = 0;
 # http://www.ldraw.org/Article218.html#coords
 # 1: Scale from LDU to mm.  1 ldu = 0.4 mm
 # 2: Rotate 90 degrees about x.  Ldraw's coord sys has -y as up, reprap's uses +z is up.
-my $s = 0.4;
-$bos->{effective_matrix} = Math::MatrixReal->new_from_rows([[$s,   0,   0,  0],
-                                                            [ 0,   0,  $s,  0],
-                                                            [ 0, -$s,   0,  0],
-                                                            [ 0,   0,   0,  1]]
+# ldraw:     1 ldu = 0.4mm, -y is up, origin for helmet is bottom of inside stud.
+# reprap:    1 mm, +z is up
+# minecraft: 1 m(?), +y is up.
+
+# Minecraft's eye-point is 1.62m (above bottom of feet).
+# An actual minifig's eye-point is 35mm.
+
+my $s = 1.62 * 0.4/35;
+$bos->{effective_matrix} = Math::MatrixReal->new_from_rows([[ $s,   0,   0,  0],
+                                                            [  0,  $s,   0,  0],
+                                                            [  0,   0,  $s,  0],
+                                                            [  0,   0,   0,  1]]
                                                            );
 
 $stack[0] = $bos;
@@ -100,10 +107,9 @@ while (@stack) {
       }
     } else {
       # Not a BFC line.
-      print "$line\n";
+      # print "$line\n";
     }
 
-    # At some point, will have to seperate out the important ones from the unimportant ones -- BFC probably the most important.
   } elsif ($line =~ m/^\s*$/) {
   } elsif ($line =~ m/^1\s/) {
     my @split = split m/\s+/, $line;
