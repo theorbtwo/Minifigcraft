@@ -61,3 +61,11 @@ processResources
         exclude 'mcmod.info'
     }
 }
+
+
+// jmm: get fairly verbose warnings from the java compiler
+apply plugin: 'java'
+    compileJava {
+        options.compilerArgs = ["-Xlint:all"]
+    }
+
