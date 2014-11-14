@@ -9,12 +9,15 @@ use 5.10.0;
 no warnings 'experimental';
 use autodie;
 use strictures 1;
+use Math::Round;
+use Imager;
 
 if(!$ARGV[0] || !-e $ARGV[0]) {
     usage();
     exit;
   }
-read_colors('LDConfig.ldr');
+my ($colorinfo, $img) = read_colors('LDConfig.ldr');
+$img->write(file=>'ldraw_texture.png');
 
 sub usage {
     say "LDraw .dat file to .STL file converter";
@@ -23,9 +26,13 @@ sub usage {
     say "Usage: $0 someldrawfile.dat > outputfile.stl";
 }
 
+sub ceil {
+  Math::Round::nhimult(1, shift);
+}
+
 sub read_colors {
   my ($filename) = @_;
-  my $colorinfo = {};
+  my $colorinfo = [];
   open my $fh, "<", $filename;
   while (<>) {
     chomp;
@@ -39,7 +46,7 @@ sub read_colors {
       # Comment
     } elsif ($_ =~ m/^0 !COLOU?R\s+(?<name>.*?)\s+CODE\s+(?<code>\d+)\s+VALUE\s+#(?<value>[0-9A-Fa-f]+)\s+EDGE\s+#(?<edge>[0-9A-Fa-f]+)(?<extra>.*)$/) {
       my $this_color = {%+};
-      $colorinfo->{$this_color->{code}} = $this_color;
+      $colorinfo->[$this_color->{code}] = $this_color;
       my $extra = delete $this_color->{extra};
       while (length $extra) {
         my $oldlen = length $extra;
@@ -54,12 +61,38 @@ sub read_colors {
           die "Don't know what to do with (rest of) extra: $extra";
         }
       }
+      $this_color->{alpha} //= 255;
     } else {
       die "Don't know what to do with .ldr declaration '$_' at $filename line $.";
     }
   }
+
+  # Right.  Read the colour info out of the file, lets put it into a texture file.
+  my $map_size = ceil(sqrt(@$colorinfo));
+  my $img = Imager->new(xsize=>$map_size,
+                        ysize=>$map_size,
+                        channels => 4);
+  for my $code (0..@$colorinfo-1) {
+    my $info = $colorinfo->[$code];
+    my $x = int($code/$map_size);
+    my $y = $code % $map_size;
+    # For now, at least, we let the other material properties be ignored.
+    my $img_color;
+    if (defined $info) {
+      $img_color = Imager::Color->new(web => $info->{value}, alpha => $info->{alpha});
+    } else {
+      $img_color = Imager::Color->new(web => '#ff00ff', alpha => 255);
+    }
+    $img->setpixel(x=>$x, y=>$y, color=>$img_color);
+    $info->{x} = $x;
+    $info->{y} = $y;
+    $info->{tex_x} = sprintf "%.4f", $x/$map_size;
+    $info->{tex_y} = sprintf "%.4f", $y/$map_size;
+  }
+
   Dump $colorinfo;
-  exit;
+  
+  return ($colorinfo, $img);
 }
 
 # Each stack entry has...
