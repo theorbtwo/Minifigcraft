@@ -7,17 +7,59 @@ use Math::MatrixReal;
 #use Data::Dump::Streamer 'Dump', 'Dumper';
 use 5.10.0;
 no warnings 'experimental';
+use autodie;
+use strictures 1;
 
 if(!$ARGV[0] || !-e $ARGV[0]) {
     usage();
     exit;
-}
+  }
+read_colors('LDConfig.ldr');
 
 sub usage {
     say "LDraw .dat file to .STL file converter";
     say "======================================";
     say "theorbtwo - Jan 2011";
     say "Usage: $0 someldrawfile.dat > outputfile.stl";
+}
+
+sub read_colors {
+  my ($filename) = @_;
+  my $colorinfo = {};
+  open my $fh, "<", $filename;
+  while (<>) {
+    chomp;
+    if ($_ =~ m/^0 LDraw\.org/ or
+        $_ =~ m/^0 (Name|Author): / or
+        $_ =~ m/^0 !LDRAW_ORG Configuration UPDATE/ or
+        $_ eq '' or
+        $_ =~ m!^0\s*//! or
+        $_ eq '0'
+       ) {
+      # Comment
+    } elsif ($_ =~ m/^0 !COLOU?R\s+(?<name>.*?)\s+CODE\s+(?<code>\d+)\s+VALUE\s+#(?<value>[0-9A-Fa-f]+)\s+EDGE\s+#(?<edge>[0-9A-Fa-f]+)(?<extra>.*)$/) {
+      my $this_color = {%+};
+      $colorinfo->{$this_color->{code}} = $this_color;
+      my $extra = delete $this_color->{extra};
+      while (length $extra) {
+        my $oldlen = length $extra;
+        
+        $extra =~ s/^\s+//;
+        $extra =~ s/\b(ALPHA|LUMINANCE|FRACTION|VFRACTION|SIZE|MINSIZE|MAXSIZE)\s+([\d.]+)// and $this_color->{lc $1} = $2;
+        $extra =~ s/\b(CHROME|METAL|PEARLESCENT|RUBBER)\b// and $this_color->{lc $1} = 1;
+        $extra =~ s/\bMATERIAL GLITTER VALUE #([0-9A-Fa-f]+)\b// and $this_color->{glitter_value} = $2;
+        $extra =~ s/\bMATERIAL SPECKLE VALUE #([0-9A-Fa-f]+)\b// and $this_color->{speckle_value} = $2;
+        
+        if (length($extra) == $oldlen) {
+          die "Don't know what to do with (rest of) extra: $extra";
+        }
+      }
+    } else {
+      die "Don't know what to do with .ldr declaration '$_' at $filename line $.";
+    }
+  }
+  Dump $colorinfo;
+  exit;
 }
 
 # Each stack entry has...
@@ -91,19 +133,14 @@ while (@stack) {
       my @flags = map {lc} split /\s+/, $1;
 
       for (@flags) {
-        when ('certify') {
-          $bos->{bfc}{certified} = 1;
-        }
-        when ('ccw') {
-          $bos->{bfc}{winding} = 'ccw';
-        }
-        when ('cw') {
-          $bos->{bfc}{winding} = 'cw';
-        }
-        when ('invertnext') {
-          $bos->{bfc}{invertnext} = 1;
-        }
-        default {
+        my $act = {'certify' => sub { $bos->{bfc}{certified} = 1;},
+                   'ccw'      => sub { $bos->{bfc}{winding} = 'ccw'; },
+                   'cw'       => sub { $bos->{bfc}{winding} = 'cw'; },
+                   'invertnext' => sub { $bos->{bfc}{invertnext} = 1; },
+                  }->{$_};
+        if ($act) {
+          $act->();
+        } else {
           $|=1;
           die "Unhandled flag $_ in BFC line";
         }
@@ -202,6 +239,7 @@ my $next_vertex_n = 1;
 
 for my $facet (@model_data) {
   my @vertex_nums;
+  my $color = $facet->{color};
   for my $vertex (@{$facet->{points}}) {
     my $n;
     # Forge's WavefrontObject seems a bit over-specific about the format of "v" lines:
