@@ -36,18 +36,21 @@ my $bos = {
 $bos->{filename} = $ARGV[0];
 $bos->{color} = 0;
 
+# Minecraft's eye-point is 1.62m (above bottom of feet).
+# An actual minifig's eye-point is 35mm.
+my $s = 1.62 * 0.4/35;
+
 # We need to specify the correct initial matrix here to:
 # http://www.ldraw.org/Article218.html#coords
 # 1: Scale from LDU to mm.  1 ldu = 0.4 mm
 # 2: Rotate 90 degrees about x.  Ldraw's coord sys has -y as up, reprap's uses +z is up.
 # ldraw:     1 ldu = 0.4mm, -y is up, origin for helmet is bottom of inside stud.
 # reprap:    1 mm, +z is up
-# minecraft: 1 m(?), +y is up.
-
-# Minecraft's eye-point is 1.62m (above bottom of feet).
-# An actual minifig's eye-point is 35mm.
-
-my $s = 1.62 * 0.4/35;
+# minecraft: 1 m(?), +y is up.  
+#     0 is feet
+#     1.62 is eye-point, 
+#     1.85 is top of head (inference from eye height)...
+#     1.80 is top of head (AABB).  Width=0.6m
 $bos->{effective_matrix} = Math::MatrixReal->new_from_rows([[ $s,   0,   0,  0],
                                                             [  0,  $s,   0,  0],
                                                             [  0,   0,  $s,  0],
