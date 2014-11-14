@@ -50,13 +50,13 @@ sub read_colors {
       my $extra = delete $this_color->{extra};
       while (length $extra) {
         my $oldlen = length $extra;
-        
+
         $extra =~ s/^\s+//;
         $extra =~ s/\b(ALPHA|LUMINANCE|FRACTION|VFRACTION|SIZE|MINSIZE|MAXSIZE)\s+([\d.]+)// and $this_color->{lc $1} = $2;
         $extra =~ s/\b(CHROME|METAL|PEARLESCENT|RUBBER)\b// and $this_color->{lc $1} = 1;
         $extra =~ s/\bMATERIAL GLITTER VALUE #([0-9A-Fa-f]+)\b// and $this_color->{glitter_value} = $2;
         $extra =~ s/\bMATERIAL SPECKLE VALUE #([0-9A-Fa-f]+)\b// and $this_color->{speckle_value} = $2;
-        
+
         if (length($extra) == $oldlen) {
           die "Don't know what to do with (rest of) extra: $extra";
         }
@@ -95,203 +95,207 @@ sub read_colors {
   return ($colorinfo, $img);
 }
 
-# Each stack entry has...
-# {filename}: Filename that this represents.
-# {color}: The color being drawn (ldraw color number)
-# {effective_matrix}: A Math::MatrixReal, 4x4, the matrix that should be (post) multiplied to give
-#  ... err, more verbiage goes here.
-# {bfc}{certified}: Set to 1 by top-level
-# {bfc}{winding}: Either cw or ccw
-# {bfc}{invertnext}: 1 when an 0 BFC INVERTNEXT command is in effect -- that is, we are looking for the "next".
-# {bfc}{inverting}: 1 when we are inverting -- the parent had an invertnext in effect.
-my @stack;
-## current item on stack (bottom of stack)
-my $bos = {
-          };
-$bos->{filename} = $ARGV[0];
-$bos->{color} = 0;
-
-# Minecraft's eye-point is 1.62m (above bottom of feet).
-# An actual minifig's eye-point is 35mm.
-my $s = 1.62 * 0.4/35;
-
-# We need to specify the correct initial matrix here to:
-# http://www.ldraw.org/Article218.html#coords
-# 1: Scale from LDU to mm.  1 ldu = 0.4 mm
-# 2: Rotate 90 degrees about x.  Ldraw's coord sys has -y as up, reprap's uses +z is up.
-# ldraw:     1 ldu = 0.4mm, -y is up, origin for helmet is bottom of inside stud.
-# reprap:    1 mm, +z is up
-# minecraft: 1 m(?), +y is up.  
-#     0 is feet
-#     1.62 is eye-point, 
-#     1.85 is top of head (inference from eye height)...
-#     1.80 is top of head (AABB).  Width=0.6m
-$bos->{effective_matrix} = Math::MatrixReal->new_from_rows([[ $s,   0,   0,  0],
-                                                            [  0,  $s,   0,  0],
-                                                            [  0,   0,  $s,  0],
-                                                            [  0,   0,   0,  1]]
-                                                           );
-
-$stack[0] = $bos;
-
-my @model_data;
-
-while (@stack) {
-  if (!$bos->{fh}) {
-    $bos->{fh} = open_ldraw_file($bos->{filename});
-  }
-
-  if (eof $bos->{fh}) {
-    pop @stack;
-    $bos = $stack[-1];
-    next;
-  }
-
-  my $line = readline($bos->{fh});
-  if (not defined $line) {
-    die "Can't read line from $bos->{filename}: $!";
-  }
-  chomp $line;
-  $line =~ s/\x0d//g;
-  $line =~ s/^\s+//;
-  $line =~ s/\s+$//;
-
-  #warn "$bos->{filename} $.: <<$line>>\n";
-
-  if ($line =~ m/^0\s/ || $line =~ m/^0$/) {
-
-    if ($line =~ m/^0 BFC (.*)$/) {
-      # http://webcache.googleusercontent.com/search?q=cache:3Ba0lniZ724J:www.ldraw.org/Article415.html&cd=1&hl=en&ct=clnk
-
-      my @flags = map {lc} split /\s+/, $1;
-
-      for (@flags) {
-        my $act = {'certify' => sub { $bos->{bfc}{certified} = 1;},
-                   'ccw'      => sub { $bos->{bfc}{winding} = 'ccw'; },
-                   'cw'       => sub { $bos->{bfc}{winding} = 'cw'; },
-                   'invertnext' => sub { $bos->{bfc}{invertnext} = 1; },
-                  }->{$_};
-        if ($act) {
-          $act->();
-        } else {
-          $|=1;
-          die "Unhandled flag $_ in BFC line";
-        }
-      }
-    } else {
-      # Not a BFC line.
-      # print "$line\n";
-    }
-
-  } elsif ($line =~ m/^\s*$/) {
-  } elsif ($line =~ m/^1\s/) {
-    my @split = split m/\s+/, $line;
-    my (undef, $color, $x, $y, $z) = splice(@split, 0, 5);
-    my @xforms = splice(@split, 0, 9);
-    my $file = shift @split;
-    if (@split) {
-      die "Too many values on type 1 line $line -- @split";
+sub ldraw_to_obj {
+  my ($dat_filename, $color_info) = @_;
+  
+  # Each stack entry has...
+  # {filename}: Filename that this represents.
+  # {color}: The color being drawn (ldraw color number)
+  # {effective_matrix}: A Math::MatrixReal, 4x4, the matrix that should be (post) multiplied to give
+  #  ... err, more verbiage goes here.
+  # {bfc}{certified}: Set to 1 by top-level
+  # {bfc}{winding}: Either cw or ccw
+  # {bfc}{invertnext}: 1 when an 0 BFC INVERTNEXT command is in effect -- that is, we are looking for the "next".
+  # {bfc}{inverting}: 1 when we are inverting -- the parent had an invertnext in effect.
+  my @stack;
+  ## current item on stack (bottom of stack)
+  my $bos = {
+            };
+  $bos->{filename} = $dat_filename;
+  $bos->{color} = 0;
+  
+  # Minecraft's eye-point is 1.62m (above bottom of feet).
+  # An actual minifig's eye-point is 35mm.
+  my $s = 1.62 * 0.4/35;
+  
+  # We need to specify the correct initial matrix here to:
+  # http://www.ldraw.org/Article218.html#coords
+  # 1: Scale from LDU to mm.  1 ldu = 0.4 mm
+  # 2: Rotate 90 degrees about x.  Ldraw's coord sys has -y as up, reprap's uses +z is up.
+  # ldraw:     1 ldu = 0.4mm, -y is up, origin for helmet is bottom of inside stud.
+  # reprap:    1 mm, +z is up
+  # minecraft: 1 m(?), +y is up.  
+  #     0 is feet
+  #     1.62 is eye-point, 
+  #     1.85 is top of head (inference from eye height)...
+  #     1.80 is top of head (AABB).  Width=0.6m
+  $bos->{effective_matrix} = Math::MatrixReal->new_from_rows([[ $s,   0,   0,  0],
+                                                              [  0,  $s,   0,  0],
+                                                              [  0,   0,  $s,  0],
+                                                              [  0,   0,   0,  1]]
+                                                            );
+  
+  $stack[0] = $bos;
+  
+  my @model_data;
+  
+  while (@stack) {
+    if (!$bos->{fh}) {
+      $bos->{fh} = open_ldraw_file($bos->{filename});
     }
     
-    my $new_xform =
-      Math::MatrixReal->new_from_rows([[$xforms[0], $xforms[1], $xforms[2], $x],
-                                       [$xforms[3], $xforms[4], $xforms[5], $y],
-                                       [$xforms[6], $xforms[7], $xforms[8], $z],
-                                       [0,          0,          0,          1 ]]);
-
-    my $old_bos = $bos;
-
-    push @stack, {};
-    $bos = $stack[-1];
-    $bos->{filename} = $file;
-    $bos->{color} = resolve_color($old_bos, $color);
-    $bos->{effective_matrix} = $old_bos->{effective_matrix} * $new_xform;
-
-    $bos->{bfc}{inverting} = $old_bos->{bfc}{inverting};
-    #warn "Inverting starts at $bos->{bfc}{inverting}\n";
-
-    $bos->{bfc}{inverting} = !$bos->{bfc}{inverting}
-      if $old_bos->{bfc}{invertnext};
-    #warn "Inverting after checking invertnext: $bos->{bfc}{inverting}\n";
-
-    #warn "Determinant: ", $new_xform->det, "\n";
-    $bos->{bfc}{inverting} = !$bos->{bfc}{inverting}
-      if $new_xform->det < 0;
-    #warn "Inversion after checking det: $bos->{bfc}{inverting}\n";
-
-    #print STDERR Dumper($old_bos);
-    #print STDERR Dumper($bos);
-
-    $old_bos->{bfc}{invertnext} = 0;
-  } elsif ($line =~ m/^2/) {
-    # We do not implement type 2 lines, which are line segments, and
-    # thus have zero width and cannot exist in the real world.
-
-  } elsif ($line =~ m/^3\s/) {
-    my ($color, @points) = extract_polygon(3, $line, $bos);
-    $color = resolve_color($bos, $color);
-
-    push @model_data, {type => 'triangle',
-                       points => [map {apply_xform($bos->{effective_matrix}, $_)} @points],
-                       color => $color};
-
-  } elsif ($line =~ m/^4\s/) {
-    my ($color, @points) = extract_polygon(4, $line, $bos);
-
-    $color = resolve_color($bos, $color);
-
-    @points = map {apply_xform($bos->{effective_matrix}, $_)} @points;
-
-    #push @model_data, {type => 'quad', points => \@points, color=>$color};
-
-    # Decompose the quad into two triangles *with the same winding as the original quad*
-    # so the output loop only has to deal with triangles, not quads.
-
-    push @model_data, {type => 'triangle',
-                       points => [$points[0], $points[1], $points[3]],
-                       color => $color
-                      };
-
-    push @model_data, {type => 'triangle',
-                       points => [$points[1], $points[2], $points[3]],
-                       color => $color
-                      };
-
-  } elsif ($line =~ m/^5\s/) {
-    # Type 5 lines are optinal line segments, and are unimplemented for the same reason as type 2.
-  } else {
-    die "Unhandled line $line from $bos->{filename}:$.";
-  }
-}
-
-#print "<finished>\n";
-#Dump \@model_data;
-
-my %vertex_knowns;
-my $next_vertex_n = 1;
-
-for my $facet (@model_data) {
-  my @vertex_nums;
-  my $color = $facet->{color};
-  for my $vertex (@{$facet->{points}}) {
-    my $n;
-    # Forge's WavefrontObject seems a bit over-specific about the format of "v" lines:
-    # private static Pattern vertexPattern = Pattern.compile("(v( (\\-){0,1}\\d+\\.\\d+){3,4} *\\n)|(v( (\\-){0,1}\\d+\\.\\d+){3,4} *$)");
-    # (v( (\\-){0,1}\\d+\\.\\d+){3,4} *\\n)|(v( (\\-){0,1}\\d+\\.\\d+){3,4} *$)
-    # (v( (\-){0,1}\d+\.\d+){3,4} *\n)|(v( (\-){0,1}\d+\.\d+){3,4} *$)
-    # (v( (-){0,1}\d+\.\d+){3,4} *\n)|(v( (\-)?\d+\.\d+){3,4} *$)
-    # There must be a dot in every number, and at least one digit both before and after it.  (Even if the coord happens to be an integer.)
-    my $short = join ' ', map {sprintf "%.4f", $_} @$vertex;
-    if ($vertex_knowns{$short}) {
-      $n = $vertex_knowns{$short};
-    } else {
-      $n = $next_vertex_n++;
-      $vertex_knowns{$short} = $n;
-      print "v $short\n";
+    if (eof $bos->{fh}) {
+      pop @stack;
+      $bos = $stack[-1];
+      next;
     }
-    push @vertex_nums, $n;
+    
+    my $line = readline($bos->{fh});
+    if (not defined $line) {
+      die "Can't read line from $bos->{filename}: $!";
+    }
+    chomp $line;
+    $line =~ s/\x0d//g;
+    $line =~ s/^\s+//;
+    $line =~ s/\s+$//;
+    
+    #warn "$bos->{filename} $.: <<$line>>\n";
+    
+    if ($line =~ m/^0\s/ || $line =~ m/^0$/) {
+      
+      if ($line =~ m/^0 BFC (.*)$/) {
+        # http://webcache.googleusercontent.com/search?q=cache:3Ba0lniZ724J:www.ldraw.org/Article415.html&cd=1&hl=en&ct=clnk
+        
+        my @flags = map {lc} split /\s+/, $1;
+        
+        for (@flags) {
+          my $act = {'certify' => sub { $bos->{bfc}{certified} = 1;},
+                     'ccw'      => sub { $bos->{bfc}{winding} = 'ccw'; },
+                     'cw'       => sub { $bos->{bfc}{winding} = 'cw'; },
+                     'invertnext' => sub { $bos->{bfc}{invertnext} = 1; },
+                    }->{$_};
+          if ($act) {
+            $act->();
+          } else {
+            $|=1;
+            die "Unhandled flag $_ in BFC line";
+          }
+        }
+      } else {
+        # Not a BFC line.
+        # print "$line\n";
+      }
+      
+    } elsif ($line =~ m/^\s*$/) {
+    } elsif ($line =~ m/^1\s/) {
+      my @split = split m/\s+/, $line;
+      my (undef, $color, $x, $y, $z) = splice(@split, 0, 5);
+      my @xforms = splice(@split, 0, 9);
+      my $file = shift @split;
+      if (@split) {
+        die "Too many values on type 1 line $line -- @split";
+      }
+      
+      my $new_xform =
+        Math::MatrixReal->new_from_rows([[$xforms[0], $xforms[1], $xforms[2], $x],
+                                         [$xforms[3], $xforms[4], $xforms[5], $y],
+                                         [$xforms[6], $xforms[7], $xforms[8], $z],
+                                         [0,          0,          0,          1 ]]);
+      
+      my $old_bos = $bos;
+      
+      push @stack, {};
+      $bos = $stack[-1];
+      $bos->{filename} = $file;
+      $bos->{color} = resolve_color($old_bos, $color);
+      $bos->{effective_matrix} = $old_bos->{effective_matrix} * $new_xform;
+      
+      $bos->{bfc}{inverting} = $old_bos->{bfc}{inverting};
+      #warn "Inverting starts at $bos->{bfc}{inverting}\n";
+      
+      $bos->{bfc}{inverting} = !$bos->{bfc}{inverting}
+        if $old_bos->{bfc}{invertnext};
+      #warn "Inverting after checking invertnext: $bos->{bfc}{inverting}\n";
+      
+      #warn "Determinant: ", $new_xform->det, "\n";
+      $bos->{bfc}{inverting} = !$bos->{bfc}{inverting}
+        if $new_xform->det < 0;
+      #warn "Inversion after checking det: $bos->{bfc}{inverting}\n";
+      
+      #print STDERR Dumper($old_bos);
+      #print STDERR Dumper($bos);
+      
+      $old_bos->{bfc}{invertnext} = 0;
+    } elsif ($line =~ m/^2/) {
+      # We do not implement type 2 lines, which are line segments, and
+      # thus have zero width and cannot exist in the real world.
+      
+    } elsif ($line =~ m/^3\s/) {
+      my ($color, @points) = extract_polygon(3, $line, $bos);
+      $color = resolve_color($bos, $color);
+      
+      push @model_data, {type => 'triangle',
+                         points => [map {apply_xform($bos->{effective_matrix}, $_)} @points],
+                         color => $color};
+      
+    } elsif ($line =~ m/^4\s/) {
+      my ($color, @points) = extract_polygon(4, $line, $bos);
+      
+      $color = resolve_color($bos, $color);
+      
+      @points = map {apply_xform($bos->{effective_matrix}, $_)} @points;
+      
+      #push @model_data, {type => 'quad', points => \@points, color=>$color};
+      
+      # Decompose the quad into two triangles *with the same winding as the original quad*
+      # so the output loop only has to deal with triangles, not quads.
+      
+      push @model_data, {type => 'triangle',
+                         points => [$points[0], $points[1], $points[3]],
+                         color => $color
+                        };
+      
+      push @model_data, {type => 'triangle',
+                         points => [$points[1], $points[2], $points[3]],
+                         color => $color
+                        };
+      
+    } elsif ($line =~ m/^5\s/) {
+      # Type 5 lines are optinal line segments, and are unimplemented for the same reason as type 2.
+    } else {
+      die "Unhandled line $line from $bos->{filename}:$.";
+    }
   }
-  print "f ", join(" ", @vertex_nums), "\n";
+  
+  #print "<finished>\n";
+  #Dump \@model_data;
+  
+  my %vertex_knowns;
+  my $next_vertex_n = 1;
+  
+  for my $facet (@model_data) {
+    my @vertex_nums;
+    my $color = $facet->{color};
+    for my $vertex (@{$facet->{points}}) {
+      my $n;
+      # Forge's WavefrontObject seems a bit over-specific about the format of "v" lines:
+      # private static Pattern vertexPattern = Pattern.compile("(v( (\\-){0,1}\\d+\\.\\d+){3,4} *\\n)|(v( (\\-){0,1}\\d+\\.\\d+){3,4} *$)");
+      # (v( (\\-){0,1}\\d+\\.\\d+){3,4} *\\n)|(v( (\\-){0,1}\\d+\\.\\d+){3,4} *$)
+      # (v( (\-){0,1}\d+\.\d+){3,4} *\n)|(v( (\-){0,1}\d+\.\d+){3,4} *$)
+      # (v( (-){0,1}\d+\.\d+){3,4} *\n)|(v( (\-)?\d+\.\d+){3,4} *$)
+      # There must be a dot in every number, and at least one digit both before and after it.  (Even if the coord happens to be an integer.)
+      my $short = join ' ', map {sprintf "%.4f", $_} @$vertex;
+      if ($vertex_knowns{$short}) {
+        $n = $vertex_knowns{$short};
+      } else {
+        $n = $next_vertex_n++;
+        $vertex_knowns{$short} = $n;
+        print "v $short\n";
+      }
+      push @vertex_nums, $n;
+    }
+    print "f ", join(" ", @vertex_nums), "\n";
+  }
 }
 
 sub apply_xform {
