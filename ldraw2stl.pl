@@ -11,13 +11,66 @@ use autodie;
 use strictures 1;
 use Math::Round;
 use Imager;
+use Term::ProgressBar;
+use JSON;
+use Try::Tiny;
 
-if(!$ARGV[0] || !-e $ARGV[0]) {
-    usage();
-    exit;
-  }
+#if(!$ARGV[0] || !-e $ARGV[0]) {
+#    usage();
+#    exit;
+#  }
+print "Reading color map & generating texture\n";
 my ($colorinfo, $img) = read_colors('LDConfig.ldr');
 $img->write(file=>'ldraw_texture.png');
+print "Done colormapping\n";
+
+binmode \*STDOUT, ':utf8';
+
+$|=1;
+my @names = @ARGV;
+@names = glob 'parts/*.dat' if not @names;
+my $prog = Term::ProgressBar->new({ count => 0+@names,
+                                  ETA => 'linear'});
+my $count=0;
+my $next_up=0;
+for my $filename (@names) {
+  #print "$filename:\n";
+  my ($obj, $meta);
+  my $e;
+  my $partnum = $filename;
+  $partnum =~ s!^parts/!!;
+  $partnum =~ s!\.dat$!!;
+  
+  try {
+    ($obj, $meta) = ldraw_to_obj($filename, $colorinfo);
+  } catch {
+    open my $error_fh, ">", "$partnum.txt" or die "Can't open $partnum.txt: $!";
+    print $error_fh "$_\n";
+    #$prog->message("$_\n");
+    print "$_\n";
+    $e++;
+  };
+  next if $e;
+  if ($obj and $meta->{minifig_slot}) {
+    my $kind = $meta->{minifig_slot};
+
+    my $partnum = $filename;
+    $partnum =~ s!^parts/!!;
+    $partnum =~ s!\.dat$!!;
+
+    my $obj_name  = "../src/main/resources/assets/minifigcraft/models/$kind/$partnum.obj";
+    open my $obj_fh, ">:raw", $obj_name;
+    print $obj_fh $obj;
+
+    my $json_name = "../src/main/resources/assets/minifigcraft/models/$kind/$partnum.json";
+    open my $json_fh, ">:utf8", $json_name;
+    print $json_fh encode_json($meta);
+  }
+  Dump $meta;
+  #$next_up = $prog->update($count)
+  #  if ++$count >= $next_up;
+}
+
 
 sub usage {
     say "LDraw .dat file to .STL file converter";
@@ -33,8 +86,10 @@ sub ceil {
 sub read_colors {
   my ($filename) = @_;
   my $colorinfo = [];
-  open my $fh, "<", $filename;
-  while (<>) {
+  open my $fh, "<", $filename or die "Can't open $filename: $!";
+  $/="\n";
+  
+  while (<$fh>) {
     chomp;
     if ($_ =~ m/^0 LDraw\.org/ or
         $_ =~ m/^0 (Name|Author): / or
@@ -90,7 +145,7 @@ sub read_colors {
     $info->{tex_y} = sprintf "%.4f", $y/$map_size;
   }
 
-  Dump $colorinfo;
+  # Dump $colorinfo;
   
   return ($colorinfo, $img);
 }
@@ -124,7 +179,7 @@ sub ldraw_to_obj {
   # 2: Rotate 90 degrees about x.  Ldraw's coord sys has -y as up, reprap's uses +z is up.
   # ldraw:     1 ldu = 0.4mm, -y is up, origin for helmet is bottom of inside stud.
   # reprap:    1 mm, +z is up
-  # minecraft: 1 m(?), +y is up.  
+  # minecraft: 1 m(?), +y is up.
   #     0 is feet
   #     1.62 is eye-point, 
   #     1.85 is top of head (inference from eye height)...
@@ -138,10 +193,12 @@ sub ldraw_to_obj {
   $stack[0] = $bos;
   
   my @model_data;
+  my $meta;
   
   while (@stack) {
     if (!$bos->{fh}) {
       $bos->{fh} = open_ldraw_file($bos->{filename});
+      $bos->{filename} = find_ldraw_file($bos->{filename});
     }
     
     if (eof $bos->{fh}) {
@@ -160,7 +217,7 @@ sub ldraw_to_obj {
     $line =~ s/\s+$//;
     
     #warn "$bos->{filename} $.: <<$line>>\n";
-    
+
     if ($line =~ m/^0\s/ || $line =~ m/^0$/) {
       
       if ($line =~ m/^0 BFC (.*)$/) {
@@ -170,30 +227,112 @@ sub ldraw_to_obj {
         
         for (@flags) {
           my $act = {'certify' => sub { $bos->{bfc}{certified} = 1;},
+                     'nocertify' => sub { $bos->{bfc}{certified} = 0;},
                      'ccw'      => sub { $bos->{bfc}{winding} = 'ccw'; },
                      'cw'       => sub { $bos->{bfc}{winding} = 'cw'; },
                      'invertnext' => sub { $bos->{bfc}{invertnext} = 1; },
+                     'noclip' => sub {
+                       # NOCLIP is fundementally impossible for us to implement, since we don't actually control clipping, the renderer does.
+                       # This does mean that, eg, 2507p01.dat = 0 Windscreen 10 x  4 x  2.333 Canopy with Silver Frame Pattern
+                       # may be misrendered (the sticker will appear only when viewed from one side).
+                     },
+                     'clip' => sub {
+                       # This just takes us back to the default that noclip took us out of.  Since we don't do anything there, there is nothing to undo here.
+                     },
                     }->{$_};
           if ($act) {
             $act->();
           } else {
             $|=1;
-            die "Unhandled flag $_ in BFC line";
+            die "Unhandled flag $_ in BFC line at $bos->{filename} line $.";
           }
         }
+      } elsif ($line =~ m/^0 ([^!].*)/ and not $meta->{firstline_name}) {
+        $meta->{firstline_name} = $1;
+      } elsif ($line =~ m/^0 (Name):\s*(.*)/) {
+        $meta->{lc $1} ||= $2;
+      } elsif ($line =~ m/^0 (Author):\s*(.*)/) {
+        # We can't check if ldraw_type is Primitive, because author is before ldraw_type in the files.
+        #if (($bos->{ldraw_type}//'') ne 'Primitive') {
+        #  $meta->{lc $1}{$2}++;
+        #}
+        my ($tag, $value) = ($1, $2);
+        if ($bos->{filename} =~ m!^parts/!) {
+          $meta->{lc $tag}{$value}++;
+        } else {
+          #print "ignoring author in ".$bos->{filename}."\n";
+        }
+      } elsif ($line =~ m/^0 !KEYWORDS\s*(.*)/) {
+        my @words = map {lc} split /,\s*/, $1;
+        $meta->{keywords}{$_}++ for @words;
+      } elsif ($line =~ m/^0 !CATEGORY\s*(.*)/) {
+        $meta->{keywords}{lc $1}++ 
+      } elsif ($line =~ m/^0 !LDRAW_ORG ([\w ]+) (UPDATE|ORIGINAL)/) {
+        $meta->{ldraw_type} //= $1;
+        $bos->{ldraw_type} = $1;
+      } elsif ($line =~ m/^0 !LICENSE (.*)/) {
+        if ($1 ne 'Redistributable under CCAL version 2.0 : see CAreadme.txt') {
+          die "Unknown license $1 at $bos->{filename} line $.";
+        }
+      } elsif ($line =~ m/^0 !CMDLINE -[cC](\d+)/) {
+        $bos->{color} = resolve_color($bos->{color}, $1);
+      } elsif ($line eq '0' or
+               $line =~ m!^0\s+//! or
+               $line =~ m/^0 !HELP/) {
+        # actual comments
+      } elsif ($line =~ m/^0 !HISTORY/) {
+        # Don't care
+      } elsif (@stack > 1) {
+        # We don't care huge amounts about metadata in sub-files.
+      } elsif ($bos->{post_header}) {
+        # ...or huge amounts about zero lines that happen after we already have geometry.
       } else {
-        # Not a BFC line.
-        # print "$line\n";
+        die "Don't know what to do with 0 line '$line' at $bos->{filename} line $.";
       }
       
+      # FIXME: Hoist up to a configuration thingy?
+      # Skip general non-minifig parts
+      if ($meta->{firstline_name} =~ m/^Sticker|Baseplate|Container|Electric|Rock|Technic (?:Axle|Angle|Shock|Gear)|Tile|Plate|Animal|Antenna|Duplo|Brick|Car|Bracket/) {
+        return;
+      }
+
+      # Skip aliases
+      if ($meta->{firstline_name} =~ m/^[~=]/) {
+        return;
+      }
+      if ($meta->{ldraw_type} and $meta->{ldraw_type} eq 'Part Alias') {
+        return;
+      }
+
+      # Don't skip shortcuts, we want helmet-with-visor shortcuts.
+      #if ($meta->{ldraw_type} and $meta->{ldraw_type} eq 'Shortcut') {
+      #  return;
+      #}
+
+      if ($meta->{firstline_name} =~ m/Minifig (Hair|Helmet|Headdress) /) {
+        $meta->{minifig_slot} = 'helmet';
+      }
+      if ($meta->{firstline_name} =~ m/Minifig Beard / or
+          $meta->{keywords}{'minifig neckwear'}) {
+        $meta->{minifig_slot} = 'neck';
+      }
+      if ($meta->{firstline_name} =~ m/Minifig (Shield|Sword)/) {
+        $meta->{category}{jmm_minifig_slot_hand}++;
+        $meta->{minifig_slot} = 'hand';
+        return;
+      }
+
     } elsif ($line =~ m/^\s*$/) {
     } elsif ($line =~ m/^1\s/) {
+      $bos->{post_header} = 1;
+      # Math::MatrixReal doesn't like floats without a leading zero.
+      $line =~ s/ (-?)\./ ${1}0./g;
       my @split = split m/\s+/, $line;
       my (undef, $color, $x, $y, $z) = splice(@split, 0, 5);
       my @xforms = splice(@split, 0, 9);
       my $file = shift @split;
       if (@split) {
-        die "Too many values on type 1 line $line -- @split";
+        die "Too many values on type 1 line $line -- @split  at $bos->{filename} line $.";
       }
       
       my $new_xform =
@@ -227,10 +366,12 @@ sub ldraw_to_obj {
       
       $old_bos->{bfc}{invertnext} = 0;
     } elsif ($line =~ m/^2/) {
+      $bos->{post_header} = 1;
       # We do not implement type 2 lines, which are line segments, and
       # thus have zero width and cannot exist in the real world.
       
     } elsif ($line =~ m/^3\s/) {
+      $bos->{post_header} = 1;
       my ($color, @points) = extract_polygon(3, $line, $bos);
       $color = resolve_color($bos, $color);
       
@@ -239,6 +380,7 @@ sub ldraw_to_obj {
                          color => $color};
       
     } elsif ($line =~ m/^4\s/) {
+      $bos->{post_header} = 1;
       my ($color, @points) = extract_polygon(4, $line, $bos);
       
       $color = resolve_color($bos, $color);
@@ -261,6 +403,7 @@ sub ldraw_to_obj {
                         };
       
     } elsif ($line =~ m/^5\s/) {
+      $bos->{post_header} = 1;
       # Type 5 lines are optinal line segments, and are unimplemented for the same reason as type 2.
     } else {
       die "Unhandled line $line from $bos->{filename}:$.";
@@ -272,10 +415,24 @@ sub ldraw_to_obj {
   
   my %vertex_knowns;
   my $next_vertex_n = 1;
+
+  my %tc_knowns;
+  my $next_tc_n = 1;
+  
+  my $obj;
   
   for my $facet (@model_data) {
-    my @vertex_nums;
-    my $color = $facet->{color};
+    my @vertex_strings;
+    my $ci = $facet->{color};
+    my $tc_short = sprintf "%s %s", $ci->{tex_x}, $ci->{tex_y};
+    my $tc_n;
+    if ($tc_knowns{$tc_short}) {
+      $tc_n = $tc_knowns{$tc_short};
+    } else {
+      $tc_n = $next_tc_n++;
+      $tc_knowns{$tc_short} = $tc_n;
+      $obj .= "vt $tc_short\n";
+    }
     for my $vertex (@{$facet->{points}}) {
       my $n;
       # Forge's WavefrontObject seems a bit over-specific about the format of "v" lines:
@@ -290,12 +447,13 @@ sub ldraw_to_obj {
       } else {
         $n = $next_vertex_n++;
         $vertex_knowns{$short} = $n;
-        print "v $short\n";
+        $obj .= "v $short\n";
       }
-      push @vertex_nums, $n;
+      push @vertex_strings, "$n/$tc_n";
     }
-    print "f ", join(" ", @vertex_nums), "\n";
+    $obj .= sprintf "f %s\n", join(" ", @vertex_strings);
   }
+  return ($obj, $meta);
 }
 
 sub apply_xform {
@@ -311,26 +469,31 @@ sub apply_xform {
 
 sub extract_polygon {
   my ($size, $line, $bos) = @_;
-  
+
+  # parts/s/2528s01.dat line 385
+  #   color
+  #      x1      y1        z1  x2 y2 z2  x3     y3       z3   x4      y4       z4
+  # 3 16 16.3651 -0.134918 2   18 -1 2   16.382 -4.12189 2    11.9744 -8.33964 2
   my @split = split m/\s+/, $line;
   shift @split;
   my $color = shift @split;
   my @points;
   $points[$_] = [splice @split, 0, 3] for 0..$size-1;
   if (@split) {
-    die "Too many arguments to type 3 line <<$line>> -- @split remain";
+    print "Too many arguments to type 3 line <<$line>> -- @split remain at $bos->{filename} line $.\n";
   }
   
   if ($bos->{bfc}{inverting}) {
     @points = reverse @points;
   }
-  
+
+  $bos->{bfc}{winding} //= 'ccw';
   if ($bos->{bfc}{winding} eq 'cw') {
     @points = reverse @points;
   } elsif ($bos->{bfc}{winding} eq 'ccw') {
     # No need to do anything
   } else {
-    die "Winding neither cw nor ccw: $bos->{bfc}{winding}";
+    die "Winding neither cw nor ccw: $bos->{bfc}{winding}  at $bos->{filename} line $.";
   }
   
   return ($color, @points);
@@ -342,19 +505,26 @@ sub extract_polygon {
 
 sub resolve_color {
   my ($stackitem, $color) = @_;
-  if ($color == 16) {
+  if ($color =~ m!^0x!) {
+    # FIXME: 0x2rrGGbb, how do we do this nicely ?
     return $stackitem->{color};
+  } elsif ($color == 16) {
+    return $stackitem->{color};
+  } elsif ($color == 24) {
+    die "Get edge color for color #$stackitem->{color} at ??? line $.";
   }
-  if ($color == 24) {
-    die "Get edge color for color #$stackitem->{color}";
+  my $ci = $colorinfo->[$color];
+  if (!$ci) {
+    die "Resolved color $color, but no colorinfo for that color?";
   }
-  return $color;
+  return $ci;
 }
 
 my %cache;
 sub find_ldraw_file {
   my ($short_name) = @_;
-
+  $short_name = lc $short_name;
+  
   my $fh;
 
   $short_name =~ s!\\!/!g;
@@ -375,7 +545,7 @@ sub find_ldraw_file {
     }
   }
 
-  die "can't find $short_name anywhere";
+  die "can't find $short_name anywhere at ??? line $.";
 }
 
 sub open_ldraw_file {

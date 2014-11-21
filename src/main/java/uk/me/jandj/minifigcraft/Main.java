@@ -3,6 +3,7 @@ package uk.me.jandj.minifigcraft;
 import cpw.mods.fml.common.Mod.EventHandler;
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.common.Mod;
+import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.registry.GameRegistry;
@@ -13,6 +14,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Item;
 import net.minecraftforge.client.event.RenderLivingEvent;
 import net.minecraftforge.common.MinecraftForge;
+import uk.me.jandj.minifigcraft.blocks.MirrorBlock;
 import uk.me.jandj.minifigcraft.items.LegoHelmet;
 import uk.me.jandj.minifigcraft.items.IRenderLivingEvent;
 
@@ -22,6 +24,9 @@ public class Main {
     public static final String VERSION="0.1";
 
     public static LegoHelmet helmet;
+    public static MirrorBlock mirror;
+
+    @SidedProxy(clientSide="uk.me.jandj.minifigcraft.ClientProxy", serverSide="uk.me.jandj.minifigcraft.ServerProxy") static ServerProxy proxy;
 
     @EventHandler
     public void init(FMLInitializationEvent event) {
@@ -29,9 +34,13 @@ public class Main {
         GameRegistry.registerItem(helmet, "helmet");
         MinecraftForge.EVENT_BUS.register(this);
 
+        mirror = new MirrorBlock();
+        GameRegistry.registerBlock(mirror, "mirror");
 
+        proxy.moreMain();
     }
 
+    /*
     @SubscribeEvent @SideOnly(Side.CLIENT)
     public void pre(RenderLivingEvent.Pre event) {
     	FMLLog.info("In Main's RLE pre!");
@@ -49,5 +58,5 @@ public class Main {
             	}
             }
         }
-    }
+    }*/
 }
