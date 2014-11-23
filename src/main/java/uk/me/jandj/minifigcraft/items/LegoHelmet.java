@@ -1,15 +1,18 @@
 package uk.me.jandj.minifigcraft.items;
+import java.io.IOException;
 import java.util.List;
 
 import cpw.mods.fml.common.FMLLog;
 import cpw.mods.fml.common.registry.GameData;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.ModelBiped;
 import net.minecraft.client.model.ModelRenderer;
 import net.minecraft.client.renderer.entity.RenderBiped;
 import net.minecraft.client.renderer.entity.RenderPlayer;
 import net.minecraft.client.renderer.entity.RendererLivingEntity;
+import net.minecraft.client.resources.IResource;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
@@ -20,9 +23,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.client.IItemRenderer;
-import net.minecraftforge.client.model.AdvancedModelLoader; // note 1.8, will probably move to net.minecraftforge.model.
+//import net.minecraftforge.client.model.AdvancedModelLoader; // note 1.8, will probably move to net.minecraftforge.model.
+//import net.minecraftforge.client.model.ModelFormatException;
 import net.minecraftforge.client.model.IModelCustom;
 import uk.me.jandj.minifigcraft.items.OurModelBase;
+import uk.me.jandj.minifigcraft.obj.WavefrontObject;
 
 
 /* I'd rather not inherit implementation from ItemArmor, but the comments in Item.getArmorTexture() suggests that it will only be called on instances of ItemArmor.
@@ -114,7 +119,7 @@ public class LegoHelmet extends ItemArmor implements IItemRenderer {
     public IModelCustom getModel(ItemStack stack) {
         if (model == null) {
             // Lazy-load the model
-            model = AdvancedModelLoader.loadModel(new ResourceLocation("minifigcraft:models/"+model_name+".obj"));
+            model = new WavefrontObject(new ResourceLocation("minifigcraft:models/helmet/"+model_name+".obj"));
             FMLLog.info("Survived loading the model!");
         }
         return model;

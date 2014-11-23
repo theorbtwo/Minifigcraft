@@ -51,6 +51,7 @@ for my $filename (@names) {
     $e++;
   };
   next if $e;
+  next if !$meta;
   if ($obj and $meta->{minifig_slot}) {
     my $kind = $meta->{minifig_slot};
 
@@ -128,12 +129,13 @@ sub read_colors {
                         ysize=>$map_size,
                         channels => 4);
   for my $code (0..@$colorinfo-1) {
+    $colorinfo->[$code] //= {};
     my $info = $colorinfo->[$code];
     my $x = int($code/$map_size);
     my $y = $code % $map_size;
     # For now, at least, we let the other material properties be ignored.
     my $img_color;
-    if (defined $info) {
+    if (defined $info->{value}) {
       $img_color = Imager::Color->new(web => $info->{value}, alpha => $info->{alpha});
     } else {
       $img_color = Imager::Color->new(web => '#ff00ff', alpha => 255);
@@ -141,8 +143,9 @@ sub read_colors {
     $img->setpixel(x=>$x, y=>$y, color=>$img_color);
     $info->{x} = $x;
     $info->{y} = $y;
-    $info->{tex_x} = sprintf "%.4f", $x/$map_size;
-    $info->{tex_y} = sprintf "%.4f", $y/$map_size;
+    # Texture coordinates seem to run with (0, 0) being the *bottom* left corner.
+    $info->{tex_x} = sprintf "%.4f", ($x+0.5)/$map_size;
+    $info->{tex_y} = sprintf "%.4f", 1-(($y+0.5)/$map_size);
   }
 
   # Dump $colorinfo;
@@ -167,7 +170,7 @@ sub ldraw_to_obj {
   my $bos = {
             };
   $bos->{filename} = $dat_filename;
-  $bos->{color} = 0;
+  $bos->{color} = $colorinfo->[0];
   
   # Minecraft's eye-point is 1.62m (above bottom of feet).
   # An actual minifig's eye-point is 35mm.
@@ -218,6 +221,10 @@ sub ldraw_to_obj {
     
     #warn "$bos->{filename} $.: <<$line>>\n";
 
+    if (!$meta->{minifig_slot} and $bos->{post_header}) {
+      return;
+    }
+    
     if ($line =~ m/^0\s/ || $line =~ m/^0$/) {
       
       if ($line =~ m/^0 BFC (.*)$/) {
@@ -275,7 +282,9 @@ sub ldraw_to_obj {
           die "Unknown license $1 at $bos->{filename} line $.";
         }
       } elsif ($line =~ m/^0 !CMDLINE -[cC](\d+)/) {
-        $bos->{color} = resolve_color($bos->{color}, $1);
+        print "Using color from !CMDLINE -c$1!\n";
+        $bos->{color} = resolve_color($bos, $1);
+        Dump $bos->{color};
       } elsif ($line eq '0' or
                $line =~ m!^0\s+//! or
                $line =~ m/^0 !HELP/) {
@@ -309,6 +318,9 @@ sub ldraw_to_obj {
       #  return;
       #}
 
+      if ($meta->{firstline_name} =~ m/Minifig (Torso) /) {
+        $meta->{minifig_slot} = 'torso';
+      }
       if ($meta->{firstline_name} =~ m/Minifig (Hair|Helmet|Headdress) /) {
         $meta->{minifig_slot} = 'helmet';
       }
@@ -419,17 +431,22 @@ sub ldraw_to_obj {
   my %tc_knowns;
   my $next_tc_n = 1;
   
-  my $obj;
+  my $obj = "mtllib everything.mtl\n";
   
   for my $facet (@model_data) {
     my @vertex_strings;
     my $ci = $facet->{color};
+    if (not ref $ci) {
+      die "Hmm, facet color $ci is not a reference?";
+    }
     my $tc_short = sprintf "%s %s", $ci->{tex_x}, $ci->{tex_y};
     my $tc_n;
     if ($tc_knowns{$tc_short}) {
       $tc_n = $tc_knowns{$tc_short};
     } else {
       $tc_n = $next_tc_n++;
+      print "Adding new tc $tc_n with $tc_short for $ci\n";
+      Dump $ci;
       $tc_knowns{$tc_short} = $tc_n;
       $obj .= "vt $tc_short\n";
     }
@@ -513,9 +530,20 @@ sub resolve_color {
   } elsif ($color == 24) {
     die "Get edge color for color #$stackitem->{color} at ??? line $.";
   }
-  my $ci = $colorinfo->[$color];
+  my $ci;
+  if (ref $color) {
+    $ci = $color;
+  } else {
+    $ci = $colorinfo->[$color];
+  }
   if (!$ci) {
     die "Resolved color $color, but no colorinfo for that color?";
+  }
+  if (!ref $ci) {
+    die "Hmm, could resolve color $color, but it's not a reference: $ci";
+  }
+  if (not defined $ci->{value}) {
+    die "Resolved color $color, but it isn't defined in the colors file";
   }
   return $ci;
 }
